@@ -1,6 +1,6 @@
 #ifndef _RINGB_H
 #define RINGB_H
-#include <SDL.h>
+#include <SDL/SDL.h>
 #define FLAC_MAX_BLOCKSIZE 4608
 #define RINGB_MAXLEN FLAC_MAX_BLOCKSIZE*2 *2/*channels*/
 

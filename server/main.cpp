@@ -17,24 +17,27 @@ typedef int socklen_t;
 typedef int SOCKET;
 typedef unsigned char BOOL;
 #define closesocket close
+#define INVALID_SOCKET -1
 #endif
 
 #include <FLAC/all.h>
-#include <SDL.h>
-#include <SDL_ttf.h>
-#include <SDL_image.h>
-#include <SDL_rotozoom.h>
+#include <SDL/SDL.h>
+#include <SDL/SDL_ttf.h>
+#include <SDL/SDL_image.h>
+#include <SDL/SDL_rotozoom.h>
 #include <vector>
 #include <string>
 #include <sstream>
 #include "ringb.h"
-//#include "daemonize.h"
 
 using std::string;
 using std::vector;
 using std::istringstream;
 
-#define PORT 4321
+#define PORT 54321
+#define X_RES 1024
+#define Y_RES 768
+
 //#define printf(n, ...) ;
 FILE * pFile;
 FLAC__StreamDecoder *dec;
@@ -42,17 +45,14 @@ Uint32 bps, channels, hz; //bytes per sample, # of channels, frequency
 SOCKET client_sd;
 BOOL need_to_rebuffer;
 
+string track_info;
+SDL_Surface *album_art;
+
 int server_thread(void *unused);
 int art_thread(void *unused);
 vector<string> split(const string &str, char delimitor);
-
-string strclip(const string &str)
-{
-	if(str.size() > 40)
-		return str.substr(0, 40) + "...";
-	else
-		return str;
-}
+string strclip(const string &str);
+void blit_album_art(SDL_Surface *screen, TTF_Font *font1, TTF_Font *font2);
 
 BOOL fill_ringb()
 {
@@ -75,9 +75,10 @@ BOOL fill_ringb()
 
 void fill_audio(void *udata, Uint8 *stream, int len)
 {
-	
-		
-	if(len <= ringb_length())
+	if (len < 0)
+		return;
+
+	if((unsigned)len <= ringb_length())
 	{
 		ringb_deq(stream,len);
 		printf("::%d %d %d %d\n", stream[0], stream[1], stream[2], stream[3]);
@@ -134,25 +135,19 @@ void errorCallback(const FLAC__StreamDecoder *decoder, FLAC__StreamDecoderErrorS
 
 int main(int argc, char *argv[])
 {
-//#ifndef NDAEMON
-//	daemonize();
-//#endif
-	
-
 	SDL_Event event;
+	SDL_Rect rect;
+	TTF_Font *font1, *font2;
 	//init winsock
 	#ifdef WIN32
     WSADATA wsaData;
     WSAStartup(MAKEWORD( 2, 2 ),&wsaData);
 	#endif
-
-		
-	//sleep(15);
 	
 	if(SDL_Init(SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0)
 	{
 		fprintf(stderr, "Couldn't open audio: %s\n", SDL_GetError());
-		return(-1);
+		return -1;
 	}
 
 	if (TTF_Init() == -1)  
@@ -161,29 +156,56 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	
-	SDL_Delay(100);
-	
-
-	SDL_Thread *thread = SDL_CreateThread(server_thread, NULL);
-	SDL_Thread *thread2 = SDL_CreateThread(art_thread, NULL);
-
-	while(SDL_WaitEvent(&event)) {  // Loop until there are no events left on the queue
-			switch(event.type) { // Process the appropiate event type
-				case SDL_KEYDOWN:  // Handle a KEYDOWN event
-				  printf("Oh! Key press\n");
-				  break;
-				case SDL_QUIT:  // Handle a QUIT event
-				  printf("Oh! quit event\n");
-				  //SDL_Quit();
-				  break;
-				default: // Report an unhandled event
-					break;
-				  //printf("I don't know what this event is!\n");
-			}
+	font1 = TTF_OpenFont("c:/windows/fonts/arial.ttf", 54);
+	font2 = TTF_OpenFont("c:/windows/fonts/arial.ttf", 44);
+	if (font1 == NULL || font2 == NULL){
+		printf("Unable to load font: %s \n", TTF_GetError());
+		return -1;
 	}
 
-	system("PAUSE");
+	//SDL_Surface *screen = SDL_SetVideoMode ( X_RES, Y_RES, 0, SDL_FULLSCREEN | SDL_ANYFORMAT) ;
+	SDL_Surface *screen = SDL_SetVideoMode ( X_RES, Y_RES, 0, SDL_ANYFORMAT) ;
+	if(screen == NULL)
+	{
+		fprintf(stderr, "Couldn't set video mode: %s\n", SDL_GetError());
+		return -1;
+	}
+
+	/* Blit the logo. */
+	SDL_Surface *logo = SDL_LoadBMP("audioFunnelLogo.bmp");
+	if (!logo){
+		printf("Unable to load logo: %s \n", SDL_GetError());
+		return -1;
+	}
+	rect.x = (X_RES-logo->w)/2;
+	rect.y = (Y_RES-logo->h)/2;
+	rect.w = logo->w;
+	rect.h = logo->h;
+	SDL_BlitSurface(logo, NULL, screen, &rect);
+	SDL_FreeSurface(logo);
+	SDL_Flip(screen);
+
+	// XXX need to cleanup threads
+	SDL_CreateThread(server_thread, NULL);
+	SDL_CreateThread(art_thread, NULL);
+
+	while(SDL_WaitEvent(&event)) {
+			switch(event.type) {
+				case SDL_QUIT:
+					goto end;
+					break;
+				case SDL_USEREVENT:
+					blit_album_art(screen, font1, font2);
+					break;
+				default:
+					break;
+			}
+	}
+end:
+	TTF_CloseFont(font1);
+	TTF_CloseFont(font2);
+
+	SDL_Quit();
 	return 0;
 
 }
@@ -199,26 +221,16 @@ int server_thread(void *unused)
 	unsigned long val;
 	SDL_AudioSpec spec;
 
-	//clear structs
 	memset(&server_addr, 0, sizeof(server_addr));
-	//use "Internet Address" Family
 	server_addr.sin_family = AF_INET;
-
-	//convert port number to network byte order
 	server_addr.sin_port = htons(PORT);
-
-	//accept connections from any ip that belongs to our host
 	server_addr.sin_addr.s_addr = INADDR_ANY;
-
-	//allocate socket (internet address family, stream socket)
 	sd = socket(AF_INET, SOCK_STREAM, 0);
-
-	//on error -- return whatever the value was
-	if(sd < 0)
+	if(sd == INVALID_SOCKET)
 		return sd;
 
    	//set socket as non-blocking
-   	val1 = 1;
+	//val1 = 1;
 	//if(fcntl(sd, F_SETFL, fcntl(sd, F_GETFD, 0)|O_NONBLOCK) < 0)
 	//if(ioctlsocket(sd, FIONBIO, &val1 ) < 0)
 	//	return -1;
@@ -246,7 +258,7 @@ int server_thread(void *unused)
    		client_sd = accept(sd, (struct sockaddr *)&client_addr, (socklen_t *)&ca_size);
 	   	
    		val = 5000;
-		setsockopt(client_sd,SOL_SOCKET,SO_RCVTIMEO, (const char *)&val, sizeof(val));
+		setsockopt(client_sd, SOL_SOCKET,SO_RCVTIMEO, (const char *)&val, sizeof(val));
 		printf("got connection!\n");
 		
 
@@ -262,10 +274,10 @@ int server_thread(void *unused)
 			if(!FLAC__stream_decoder_process_single(dec))
 			{
 				closesocket(client_sd);
-				client_sd = -1;
+				client_sd = INVALID_SOCKET;
 				break;
 			}
-		if(client_sd == -1)
+		if(client_sd == INVALID_SOCKET)
 			continue;
 		printf("got first audio frame!\n");
 
@@ -327,55 +339,18 @@ int art_thread(void *unused)
 
 	unsigned long val1;
 	unsigned long val;
-	SDL_Surface *screen = SDL_SetVideoMode ( 1280, 1024, 0, SDL_FULLSCREEN | SDL_ANYFORMAT) ;
 	SDL_ShowCursor(0);
-	SDL_Color color = { 0xFF, 0xFF, 0xFF, 0xFF};
-	TTF_Font* font1;
-	TTF_Font* font2;
-	SDL_Surface *logo;
-	SDL_Rect rect;
-	font1 = TTF_OpenFont("c:/windows/fonts/futura lt medium.ttf", 54);
-	font2 = TTF_OpenFont("c:/windows/fonts/futura lt medium.ttf", 44);
-	
-	if (font1 == NULL || font2 == NULL){
-		printf("Unable to load font: %s \n", TTF_GetError());
-		exit(1);
-	}
 
-	logo = SDL_LoadBMP("audioFunnelLogo.bmp");
-
-	if (!logo){
-		printf("Unable to load logo: %s \n", SDL_GetError());
-		exit(1);
-	}
-	rect.x = (1280-logo->w)/2;
-	rect.y = (1024-logo->h)/2;
-	rect.w = logo->w;
-	rect.h = logo->h;
-	SDL_BlitSurface(logo, NULL, screen, &rect);
-	SDL_FreeSurface(logo);
-	SDL_Flip(screen);
-
-	//clear structs
 	memset(&server_addr, 0, sizeof(server_addr));
-	//use "Internet Address" Family
 	server_addr.sin_family = AF_INET;
-
-	//convert port number to network byte order
 	server_addr.sin_port = htons(PORT+1);
-
-	//accept connections from any ip that belongs to our host
 	server_addr.sin_addr.s_addr = INADDR_ANY;
-
-	//allocate socket (internet address family, stream socket)
 	sd = socket(AF_INET, SOCK_STREAM, 0);
-
-	//on error -- return whatever the value was
-	if(sd < 0)
+	if(sd == INVALID_SOCKET)
 		return sd;
 
    	//set socket as non-blocking
-   	val1 = 1;
+	//val1 = 1;
 	//if(fcntl(sd, F_SETFL, fcntl(sd, F_GETFD, 0)|O_NONBLOCK) < 0)
 	//if(ioctlsocket(sd, FIONBIO, &val1 ) < 0)
 	//	return -1;
@@ -396,7 +371,6 @@ int art_thread(void *unused)
 	if( listen(sd, 1) < 0)
 		return -1;
 		
-	int textpos = 0;
 	while(1)
 	{
 		printf("waiting for metadata connection...");
@@ -413,7 +387,7 @@ int art_thread(void *unused)
 			continue;
 		}
 			
-		if(recv(client_sd, (char *)&ca_size, sizeof(ca_size), 0) < sizeof(ca_size))
+		if(recv(client_sd, (char *)&ca_size, sizeof(ca_size), 0) < (int)sizeof(ca_size))
 		{
 			closesocket(client_sd);
 			continue;
@@ -440,60 +414,23 @@ int art_thread(void *unused)
 
 		if(code == 'T')
 		{
-			string title, artist, album;
-			vector<string> fields = split(buffer, '\n');
-			if(fields.size() > 0)
-				title = strclip(fields[0]);
-			else
-				title = "";
-
-			if(fields.size() > 1)
-				artist = strclip(fields[1]);
-			else
-				artist = "";
-
-			if(fields.size() > 2)
-				album = strclip(fields[2]);
-			else
-				album = "";
-
-
-			SDL_Surface *titlesurface = TTF_RenderText_Blended(font1, title.c_str(), color);
-			SDL_Surface *artistsurface = TTF_RenderText_Blended(font2, artist.c_str(), color);
-			SDL_Surface *albumsurface = TTF_RenderText_Blended(font2, album.c_str(), color);
-
-			SDL_FillRect(screen, NULL, 0);
-			SDL_Rect r = {80, 730, 0, 0};
-			if(titlesurface)
-			{
-				SDL_BlitSurface(titlesurface, NULL, screen, &r);
-				r.y +=titlesurface->h -4;
-				if(artistsurface)
-				{
-					SDL_BlitSurface(artistsurface, NULL, screen, &r);
-					r.y +=artistsurface->h ;
-					SDL_BlitSurface(albumsurface, NULL, screen, &r);
-				}
-			}
-
-			SDL_Flip(screen);
-			SDL_FreeSurface(titlesurface);
-			SDL_FreeSurface(artistsurface);
-			SDL_FreeSurface(albumsurface);
-
+			track_info = string(buffer);
+			printf("got track info: %s\n", track_info.c_str());
 		}
 		else if(code == 'A')
 		{
 			SDL_RWops *rwops = SDL_RWFromMem(buffer, len);
 			SDL_Surface *surface = IMG_Load_RW(rwops, 1);
-			SDL_Surface *scaled = rotozoomSurface(surface, 0, 600.0/surface->h, 1);
+			if (album_art) {
+				SDL_FreeSurface(album_art);
+			}
+			album_art = rotozoomSurface(surface, 0, 600.0/surface->h, 1);
 			SDL_FreeSurface(surface);
-			SDL_Rect r = {1280-scaled->w>0?(1280-scaled->w)/2:0, 90, scaled->h, scaled->w};
-			textpos = r.x;
-			SDL_BlitSurface(scaled, NULL, screen, &r);
-			SDL_Flip(screen);
-			SDL_FreeSurface(scaled);
+			printf("got album art\n");
 		}
+		SDL_Event e;
+		e.type = SDL_USEREVENT;
+		SDL_PushEvent(&e);
 		delete[] buffer;
 		closesocket(client_sd);
 	}
@@ -501,14 +438,81 @@ int art_thread(void *unused)
 	return 0;
 }
 
-vector<string> split(const string &str, char delimitor)
+void blit_album_art(SDL_Surface *screen, TTF_Font *font1, TTF_Font *font2)
+{
+	/* first, process and blit the track information text */
+	string title, artist, album;
+	vector<string> fields = split(track_info, '\n');
+	if(fields.size() > 0)
+		title = strclip(fields[0]);
+	else
+		title = "";
+
+	if(fields.size() > 1)
+		artist = strclip(fields[1]);
+	else
+		artist = "";
+
+	if(fields.size() > 2)
+		album = strclip(fields[2]);
+	else
+		album = "";
+
+	SDL_Color color = { 0xFF, 0xFF, 0xFF, 0xFF};
+	SDL_Surface *titlesurface = TTF_RenderText_Blended(font1, title.c_str(), color);
+	SDL_Surface *artistsurface = TTF_RenderText_Blended(font2, artist.c_str(), color);
+	SDL_Surface *albumsurface = TTF_RenderText_Blended(font2, album.c_str(), color);
+
+	SDL_FillRect(screen, NULL, 0);
+	SDL_Rect r = {80, 730, 0, 0};
+	if(titlesurface)
+	{
+		SDL_BlitSurface(titlesurface, NULL, screen, &r);
+		r.y +=titlesurface->h -4;
+		if(artistsurface)
+		{
+			SDL_BlitSurface(artistsurface, NULL, screen, &r);
+			r.y +=artistsurface->h ;
+			SDL_BlitSurface(albumsurface, NULL, screen, &r);
+		}
+	}
+	SDL_FreeSurface(titlesurface);
+	SDL_FreeSurface(artistsurface);
+	SDL_FreeSurface(albumsurface);
+
+	if (album_art)
+	{
+		/* then, blit the actual album art */
+		r.x = X_RES-album_art->w>0?(X_RES-album_art->w)/2:0;
+		r.y = 90;
+		r.h = album_art->h;
+		r.w = album_art->w;
+		SDL_BlitSurface(album_art, NULL, screen, &r);
+		SDL_Flip(screen);
+
+		SDL_FreeSurface(album_art);
+		album_art = NULL;
+	}
+	SDL_Flip(screen);
+
+}
+
+vector<string> split(const string &str, char delimiter)
 {
 	vector<string> arr;
 	
 	istringstream ss(str);
 	string tmp;
-	while(getline(ss, tmp, delimitor))
+	while(getline(ss, tmp, delimiter))
 		arr.push_back(tmp);
 
 	return arr;
+}
+
+string strclip(const string &str)
+{
+	if(str.size() > 40)
+		return str.substr(0, 40) + "...";
+	else
+		return str;
 }

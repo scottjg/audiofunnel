@@ -63,12 +63,12 @@ void ringb_append(Uint8 *data, Uint32 len)
 
 void ringb_deq(Uint8 *data, Uint32 len)
 {
-   	Uint32 len_right;
+	Uint32 len_right;
 	Uint32 cpylen_right;
 	Uint32 cpylen_left;
 
 	SDL_LockMutex(lock);
-   	len_right = ringb_maxsize - ringb_pos;
+	len_right = ringb_maxsize - ringb_pos;
 	cpylen_right = (len > len_right ? len_right : len);
 	cpylen_left = len - cpylen_right;
 
