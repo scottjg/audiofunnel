@@ -1,0 +1,33 @@
+Given how annoying it is to manually build all the dependencies on Windows, I decided to just build them all once, and keep them in the git repository.
+
+Sources for these packages are available at their respective homes:
+
+http://www.libsdl.org/
+http://www.libsdl.org/release/SDL-1.2.15.tar.gz
+
+http://www.libsdl.org/projects/SDL_image/
+http://www.libsdl.org/projects/SDL_image/release/SDL_image-1.2.12.tar.gz
+
+http://www.ferzkopp.net/Software/SDL_gfx-2.0/
+http://www.ferzkopp.net/Software/SDL_gfx-2.0/SDL_gfx-2.0.23.tar.gz
+
+http://www.libsdl.org/projects/SDL_ttf/
+http://www.libsdl.org/projects/SDL_ttf/release/SDL_ttf-2.0.11.tar.gz
+
+http://www.zlib.net/
+http://zlib.net/zlib-1.2.6.tar.gz
+
+http://www.libpng.org/
+http://download.sourceforge.net/libpng/libpng-1.5.10.tar.gz
+
+http://libjpeg.sourceforge.net/
+http://sourceforge.net/projects/libjpeg/files/libjpeg/6b/jpegsrc.v6b.tar.gz
+
+http://www.libtiff.org/
+http://download.osgeo.org/libtiff/tiff-4.0.1.tar.gz
+
+http://www.freetype.org/
+http://download.savannah.gnu.org/releases/freetype/freetype-2.4.9.tar.gz
+
+http://flac.sf.net/
+http://sourceforge.net/projects/flac/files/flac-src/flac-1.2.1-src/flac-1.2.1.tar.gz
