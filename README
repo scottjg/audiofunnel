@@ -1,0 +1,13 @@
+===============
+Audio Funnel
+===============
+
+Audio Funnel is a user-level audio interception utility, which can can redirect audio over the network to a remote server. It uses the FLAC codec to transmit the audio, and can also send album art and metadata, to create a neat visual display.
+
+The current client implementation was written as an Windows iTunes visualizer plugin, which hot-patches the DirectSound api in order to steal the audio for its own nefarious purposes.
+
+The server implementation is written with SDL, so it should be portable to any modern platform.
+
+Admittedly, this project was way more impressive when I got it working some ~5 years ago, before the iTunes AirPlay private keys were cracked. Still, with a little bit more work, it could be adapted to interface with any application (like say, Spotify), so the code may have some life left. 
+
+The code has bit-rotted somewhat, but the hot-patching functionality is interesting enough that I would prefer not to lose it, so i figure it can't hurt to post it publically.
